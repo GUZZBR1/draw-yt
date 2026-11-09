@@ -19,6 +19,8 @@ class FrameRecord:
     ahash: str = ""
     kept_level0: bool = False
     drop_reason: str = ""
+    sheet_presence: float | None = None
+    ink_density: float | None = None
     cluster_id: int = -1
     selection_reason: str = ""
     label_kind: str = ""  # "reviewed" | "pseudo" | ""

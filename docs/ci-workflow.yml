@@ -1,0 +1,29 @@
+# Activation: copy this file to .github/workflows/ci.yml in the repo.
+# It lives here because the automation that maintains this repo does not
+# have GitHub's `workflows` permission to write that path directly.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e .
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: CLI smoke
+        run: |
+          drawyt --version
+          python -m drawyt --help

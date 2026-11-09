@@ -17,6 +17,8 @@ from .discover import search_query
 from .download import download_video, file_sha256
 from .extract import extract_frames
 from .features import frame_embedding
+from .ids import parse_video_id
+from .judges import BrightRegionJudge
 from .license_check import check_license
 from .manifest import FrameRecord, VideoRecord, write_frames_csv, write_receipt, write_videos_jsonl
 from .prune import IMAGE_SUFFIXES, prune_frames
@@ -116,7 +118,8 @@ def cmd_extract(args) -> int:
 def cmd_prune(args) -> int:
     frames_dir = Path(args.frames)
     video_id = args.video_id or frames_dir.name
-    records, receipt = prune_frames(frames_dir, video_id)
+    judge = BrightRegionJudge() if args.judge else None
+    records, receipt = prune_frames(frames_dir, video_id, judge=judge)
     out = Path(args.out)
     write_frames_csv(records, out / "frames_manifest.csv")
     write_receipt({"stage": "prune_level0", **receipt}, out / "receipt_prune.json")
@@ -124,29 +127,19 @@ def cmd_prune(args) -> int:
     return 0
 
 
-def cmd_coreset(args) -> int:
-    frames_dir = Path(args.frames)
-    paths = sorted(p for p in frames_dir.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
-    if not paths:
-        print("coreset: no frames found", file=sys.stderr)
-        return 1
+def _run_coreset(paths: list[Path], video_id: str, budget: int, out: Path) -> dict:
     embeddings = []
     for path in paths:
         with Image.open(path) as image:
             embeddings.append(frame_embedding(image))
     matrix = np.stack(embeddings)
     seed = medoid_index(matrix)
-    chosen = kcenter_greedy(matrix, args.budget, seed_index=seed)
+    chosen = kcenter_greedy(matrix, budget, seed_index=seed)
     clusters = assign_clusters(matrix, chosen)
-
-    out = Path(args.out)
     (out / "frames").mkdir(parents=True, exist_ok=True)
-    video_id = args.video_id or frames_dir.name
     records: list[FrameRecord] = []
-    chosen_set = set(chosen)
-    for idx, path in enumerate(paths):
-        if idx not in chosen_set:
-            continue
+    for idx in chosen:
+        path = paths[idx]
         dest = out / "frames" / path.name
         shutil.copy2(path, dest)
         records.append(
@@ -159,26 +152,38 @@ def cmd_coreset(args) -> int:
             )
         )
     write_frames_csv(records, out / "manifest_frames.csv")
-    receipt = {
-        "stage": "coreset_kcenter",
-        "input_frames": len(paths),
-        "budget": args.budget,
-        "selected": len(records),
-    }
+    receipt = {"stage": "coreset_kcenter", "input_frames": len(paths), "budget": budget, "selected": len(records)}
     write_receipt(receipt, out / "receipt_coreset.json")
-    print(f"coreset: {len(records)}/{len(paths)} selected -> {out}")
+    return receipt
+
+
+def cmd_coreset(args) -> int:
+    frames_dir = Path(args.frames)
+    video_id = args.video_id or frames_dir.name
+    if args.from_manifest:
+        rows = _read_csv(Path(args.from_manifest))
+        paths = [Path(r["path"]) for r in rows if r.get("kept_level0") in ("True", "true", "1")]
+        if not paths:
+            print("coreset: prune manifest has no kept frames", file=sys.stderr)
+            return 1
+    else:
+        paths = sorted(p for p in frames_dir.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+        if not paths:
+            print("coreset: no frames found", file=sys.stderr)
+            return 1
+    receipt = _run_coreset(paths, video_id, args.budget, Path(args.out))
+    print(f"coreset: {receipt['selected']}/{receipt['input_frames']} selected -> {args.out}")
     return 0
 
 
 def cmd_fetch(args) -> int:
     """One-shot personal pipeline: URL/ID -> video -> frames -> pruned manifest."""
-    from .download import download_video as _dl
-
-    video_ref = args.url.rstrip("/").split("/")[-1].split("=")[-1].split("?")[0]
+    video_ref = parse_video_id(args.url)
     root = Path(args.out)
-    path, route_used = _dl(video_ref, root / "videos")
+    path, route_used = download_video(video_ref, root / "videos")
     frames = extract_frames(path, root / "frames" / video_ref, fps=args.fps)
-    records, receipt = prune_frames(root / "frames" / video_ref, video_ref)
+    judge = BrightRegionJudge() if args.judge else None
+    records, receipt = prune_frames(root / "frames" / video_ref, video_ref, judge=judge)
     write_frames_csv(records, root / "work" / video_ref / "frames_manifest.csv")
     combined = {
         "stage": "fetch",
@@ -190,6 +195,9 @@ def cmd_fetch(args) -> int:
         "frames_extracted": len(frames),
         "prune": receipt,
     }
+    if args.budget:
+        kept_paths = [Path(r.path) for r in records if r.kept_level0]
+        combined["coreset"] = _run_coreset(kept_paths, video_ref, args.budget, root / "coreset")
     write_receipt(combined, root / "receipt_fetch.json")
     print(
         f"fetch: {video_ref} via {route_used}: {combined['bytes']} bytes, "
@@ -218,13 +226,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("download", help="download verified videos (720p, no audio)")
     p.add_argument("input")
     p.add_argument("--out", required=True)
-    p.add_argument("--cc-only", action="store_true", default=True)
+    p.add_argument("--cc-only", action=argparse.BooleanOptionalAction, default=True)
     p.set_defaults(fn=cmd_download)
 
     p = sub.add_parser("fetch", help="one-shot: download a video and prune its frames")
     p.add_argument("url", help="YouTube URL or bare video ID")
     p.add_argument("--out", required=True)
     p.add_argument("--fps", type=float, default=1.0)
+    p.add_argument("--budget", type=int, default=0, help="if >0, also build a coreset of this size from the kept frames")
+    p.add_argument("--judge", action="store_true", help="score kept frames with the baseline sheet/ink judge")
     p.set_defaults(fn=cmd_fetch)
 
     p = sub.add_parser("extract", help="extract frames from a local video (ffmpeg)")
@@ -237,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("frames")
     p.add_argument("--out", required=True)
     p.add_argument("--video-id")
+    p.add_argument("--judge", action="store_true", help="score kept frames with the baseline sheet/ink judge")
     p.set_defaults(fn=cmd_prune)
 
     p = sub.add_parser("coreset", help="k-center coreset selection over a frames folder")
@@ -244,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--budget", type=int, required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--video-id")
+    p.add_argument("--from-manifest", help="prune frames_manifest.csv: select only from frames kept at level 0")
     p.set_defaults(fn=cmd_coreset)
     return parser
 

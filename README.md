@@ -65,7 +65,7 @@ Pruning and coreset selection work on any folder of frames — no YouTube requir
 
 ```bash
 # one-shot: download a video and prune its frames in a single command
-drawyt fetch https://www.youtube.com/watch?v=VIDEO_ID --out runs/VIDEO_ID
+drawyt fetch https://www.youtube.com/watch?v=VIDEO_ID --out runs/VIDEO_ID --judge --budget 500
 
 # or stage by stage: extract frames from a local video
 drawyt extract path/to/video.mp4 --out frames/VIDEO_ID --fps 1
@@ -138,7 +138,8 @@ Active development. What is implemented and tested today:
 - [x] YouTube discovery, per-video license verification, and download wrappers around `yt-dlp`
 - [x] Live end-to-end proof: real videos downloaded and pruned on a bot-checked network ([receipt](docs/LIVE_TEST_2026-11-09.md)); `drawyt fetch` one-shot command
 - [x] Frame extraction via `ffmpeg`, manifests and receipts for every stage
-- [ ] Domain judges (Level 1) wired to Draw's sheet/ink models and hand landmarker
+- [x] Domain judges (Level 1) wired behind the `Judge` interface — baseline bright-region judge scores kept frames today (`--judge`); Draw's neural sheet/ink models and hand landmarker plug into the same interface
+- [ ] Neural judges (Draw's sheet/ink ONNX + hand landmarker) behind that interface
 - [ ] Information pruning (Level 3): judge disagreement + uncertainty ranking
 - [ ] First full run: pilot on 5 videos, then the 33-video CC BY batch already identified
 

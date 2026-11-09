@@ -29,6 +29,7 @@ def prune_frames(
     frames_dir: Path,
     video_id: str,
     *,
+    judge=None,
     hash_distance: int = 4,
     static_threshold: float = 0.004,
     min_sharpness_quantile: float = 0.10,
@@ -102,6 +103,11 @@ def prune_frames(
             continue
 
         record.kept_level0 = True
+        if judge is not None:
+            with Image.open(path) as judged_image:
+                scores = judge.score(judged_image)
+            record.sheet_presence = scores.sheet_presence
+            record.ink_density = scores.ink_density
         kept_hashes.append(ahash)
         prev_gray = gray
         receipt["kept"] += 1
