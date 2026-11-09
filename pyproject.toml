@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drawyt"
+version = "0.1.0"
+description = "Collect YouTube videos of writing/drawing on paper and prune their frames into a coreset for the Draw project."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "Pillow>=10",
+    "yt-dlp>=2024.0",
+]
+
+[project.scripts]
+drawyt = "drawyt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

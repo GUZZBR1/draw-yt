@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# data never lives in this repo
+videos/
+frames/
+work/
+coreset/
+*.mp4
+*.mkv
+*.webm
+receipts/
