@@ -64,7 +64,10 @@ drawyt --help
 Pruning and coreset selection work on any folder of frames — no YouTube required:
 
 ```bash
-# extract frames from a local video
+# one-shot: download a video and prune its frames in a single command
+drawyt fetch https://www.youtube.com/watch?v=VIDEO_ID --out runs/VIDEO_ID
+
+# or stage by stage: extract frames from a local video
 drawyt extract path/to/video.mp4 --out frames/VIDEO_ID --fps 1
 
 # level 0 pruning + manifest
@@ -87,7 +90,7 @@ drawyt check candidates.csv --out verified.csv
 drawyt download verified.csv --out videos/
 ```
 
-> **Measured caveat:** from some networks, YouTube blocks the actual pixel download with a bot check while metadata still flows. `draw-yt` treats download routes as one-at-a-time attempts with receipts — never a blind retry loop — and the manifest records which route delivered each file. Details in the [spec](docs/SPEC.pt-BR.md).
+> **Measured download behaviour (2026-11-09, [full receipt](docs/LIVE_TEST_2026-11-09.md)):** from a datacenter IP, YouTube bot-checks the default web client — but the android player client (with Node.js as JS runtime) downloads fine from the same machine. `draw-yt` therefore tries named routes once each, in quality order (default → android-node → tv/ios/web-embedded), never loops on a dead route, and records which route delivered each file. In the measured session the android route delivered 360p (SABR experiment); on a residential connection the default route delivers up to the 720p cap.
 
 ## Concepts, in plain words
 
@@ -133,6 +136,7 @@ Active development. What is implemented and tested today:
 - [x] Frame features: sharpness, luminance, colour-histogram embeddings (NumPy + Pillow only)
 - [x] Coreset selection (Level 2): k-center greedy coverage with per-cluster quotas
 - [x] YouTube discovery, per-video license verification, and download wrappers around `yt-dlp`
+- [x] Live end-to-end proof: real videos downloaded and pruned on a bot-checked network ([receipt](docs/LIVE_TEST_2026-11-09.md)); `drawyt fetch` one-shot command
 - [x] Frame extraction via `ffmpeg`, manifests and receipts for every stage
 - [ ] Domain judges (Level 1) wired to Draw's sheet/ink models and hand landmarker
 - [ ] Information pruning (Level 3): judge disagreement + uncertainty ranking

@@ -78,7 +78,7 @@ def cmd_download(args) -> int:
         if args.cc_only and row.get("cc_by_confirmed") != "sim":
             continue
         try:
-            path = download_video(row["video_id"], out_dir)
+            path, route_used = download_video(row["video_id"], out_dir)
         except Exception as exc:  # one attempt per route; report, do not loop
             print(f"download: FAILED {row['video_id']}: {exc}", file=sys.stderr)
             failures += 1
@@ -94,7 +94,7 @@ def cmd_download(args) -> int:
                 cc_by_confirmed=row.get("cc_by_confirmed") == "sim",
                 sha256=file_sha256(path),
                 bytes=path.stat().st_size,
-                download_route="yt-dlp-default",
+                download_route=route_used,
             )
         )
         print(f"download: ok {row['video_id']} ({path.stat().st_size} bytes)")
@@ -170,6 +170,34 @@ def cmd_coreset(args) -> int:
     return 0
 
 
+def cmd_fetch(args) -> int:
+    """One-shot personal pipeline: URL/ID -> video -> frames -> pruned manifest."""
+    from .download import download_video as _dl
+
+    video_ref = args.url.rstrip("/").split("/")[-1].split("=")[-1].split("?")[0]
+    root = Path(args.out)
+    path, route_used = _dl(video_ref, root / "videos")
+    frames = extract_frames(path, root / "frames" / video_ref, fps=args.fps)
+    records, receipt = prune_frames(root / "frames" / video_ref, video_ref)
+    write_frames_csv(records, root / "work" / video_ref / "frames_manifest.csv")
+    combined = {
+        "stage": "fetch",
+        "video_id": video_ref,
+        "route": route_used,
+        "file": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": file_sha256(path),
+        "frames_extracted": len(frames),
+        "prune": receipt,
+    }
+    write_receipt(combined, root / "receipt_fetch.json")
+    print(
+        f"fetch: {video_ref} via {route_used}: {combined['bytes']} bytes, "
+        f"{len(frames)} frames, {receipt['kept']} kept after pruning -> {root}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="drawyt", description="YouTube -> coreset pipeline for Draw.")
     parser.add_argument("--version", action="version", version=f"drawyt {__version__}")
@@ -192,6 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", required=True)
     p.add_argument("--cc-only", action="store_true", default=True)
     p.set_defaults(fn=cmd_download)
+
+    p = sub.add_parser("fetch", help="one-shot: download a video and prune its frames")
+    p.add_argument("url", help="YouTube URL or bare video ID")
+    p.add_argument("--out", required=True)
+    p.add_argument("--fps", type=float, default=1.0)
+    p.set_defaults(fn=cmd_fetch)
 
     p = sub.add_parser("extract", help="extract frames from a local video (ffmpeg)")
     p.add_argument("video")
